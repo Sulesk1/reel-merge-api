@@ -1,9 +1,6 @@
-# filename: merge_reel_webhook.py
-
 import os
 import subprocess
 from flask import Flask, request, send_file
-from werkzeug.utils import secure_filename
 import uuid
 
 app = Flask(__name__)
@@ -18,30 +15,37 @@ def render_video():
 
         narration = files.get("audio")
         subtitle = files.get("subtitle")
-        videos = [files.get(f"video{i}") for i in range(1, 6) if files.get(f"video{i}")]
 
+        # Automatically get video1–video5
+        videos = [files.get(f"video{i}") for i in range(1, 6) if files.get(f"video{i}")]
         if not narration:
             return "❌ Missing 'audio' file", 400
-        if len(videos) < 1:
+        if len(videos) == 0:
             return "❌ No video clips provided", 400
 
-        # Save uploaded video files
         video_filenames = []
+
+        # ✅ Step 1: Save and re-encode each video to FFmpeg-safe format
         for i, file in enumerate(videos):
-            filename = f"clip{i}.mp4"
-            filepath = os.path.join(UPLOAD_DIR, filename)
-            file.save(filepath)
-            video_filenames.append(filename)
+            raw_path = os.path.join(UPLOAD_DIR, f"raw{i}.mp4")
+            safe_path = os.path.join(UPLOAD_DIR, f"clip{i}.mp4")
+            file.save(raw_path)
 
-        print("✅ Saved video files:", video_filenames)
+            print(f"🔁 Re-encoding raw{i}.mp4 → clip{i}.mp4")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", raw_path,
+                "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart",
+                safe_path
+            ], check=True)
 
-        # Save narration
-        audio_filename = "narration.mp3"
-        audio_path = os.path.join(UPLOAD_DIR, audio_filename)
+            video_filenames.append(f"clip{i}.mp4")
+
+        # ✅ Step 2: Save narration
+        audio_path = os.path.join(UPLOAD_DIR, "narration.mp3")
         narration.save(audio_path)
-        print("✅ Saved audio as:", audio_path)
+        print("✅ Saved narration as:", audio_path)
 
-        # Save subtitle if provided
+        # ✅ Step 3: Save subtitle if present
         subtitle_filename = None
         if subtitle:
             subtitle_filename = "subs.srt"
@@ -49,50 +53,43 @@ def render_video():
             subtitle.save(subtitle_path)
             print("✅ Saved subtitle as:", subtitle_path)
 
-        # Confirm temp folder contents
-        print("📁 TEMP DIR CONTENT:", os.listdir(UPLOAD_DIR))
-
-        # Create concat list
+        # ✅ Step 4: Create concat list
         concat_list_path = os.path.join(UPLOAD_DIR, "concat_list.txt")
         with open(concat_list_path, "w") as f:
             for filename in video_filenames:
                 f.write(f"file '{filename}'\n")
-        print("✅ Created concat list at:", concat_list_path)
 
         cwd = os.path.abspath(UPLOAD_DIR)
+        print("📁 TEMP FILES:", os.listdir(UPLOAD_DIR))
 
-        # Merge clips
+        # ✅ Step 5: Concat all clips
         merged_filename = f"merged_{uuid.uuid4().hex}.mp4"
-        print("🚀 Running clip merge:", merged_filename)
         try:
             subprocess.run([
                 "ffmpeg", "-f", "concat", "-safe", "0", "-i", "concat_list.txt",
                 "-c", "copy", merged_filename
             ], check=True, cwd=cwd, capture_output=True)
         except subprocess.CalledProcessError as e:
-            print("❌ FFmpeg concat error:")
-            print(e.stderr.decode() if e.stderr else e)
-            return f"Concat error:\n{e.stderr.decode() if e.stderr else e}", 500
+            print("❌ FFmpeg concat failed:", e.stderr.decode() if e.stderr else str(e))
+            return f"Concat error:\n{e.stderr.decode() if e.stderr else str(e)}", 500
 
-        # Add audio + subtitles
+        # ✅ Step 6: Add audio and optional subtitles
         final_filename = f"final_{uuid.uuid4().hex}.mp4"
         command = [
-            "ffmpeg", "-i", merged_filename, "-i", audio_filename,
+            "ffmpeg", "-y", "-i", merged_filename, "-i", "narration.mp3",
             "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-shortest"
         ]
         if subtitle_filename:
             command += ["-vf", f"subtitles={subtitle_filename}"]
         command += [final_filename]
 
-        print("🚀 Running audio + subtitle merge...")
         try:
             subprocess.run(command, check=True, cwd=cwd, capture_output=True)
         except subprocess.CalledProcessError as e:
-            print("❌ FFmpeg final merge error:")
-            print(e.stderr.decode() if e.stderr else e)
-            return f"Final merge error:\n{e.stderr.decode() if e.stderr else e}", 500
+            print("❌ FFmpeg final merge failed:", e.stderr.decode() if e.stderr else str(e))
+            return f"Final merge error:\n{e.stderr.decode() if e.stderr else str(e)}", 500
 
-        print("✅ Returning final video:", final_filename)
+        print("🎉 Final video ready:", final_filename)
         return send_file(os.path.join(cwd, final_filename), mimetype="video/mp4")
 
     except Exception as e:
