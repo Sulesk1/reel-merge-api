@@ -17,46 +17,61 @@ def render_video():
     subtitle = files.get("subtitle")
     videos = [files.get(f"video{i}") for i in range(1, 6) if files.get(f"video{i}")]
 
-    # Save uploaded files
+    if not narration:
+        return "Missing 'audio' file", 400
+    if len(videos) < 1:
+        return "No video clips provided", 400
+
+    # Save uploaded videos
     video_paths = []
     for i, file in enumerate(videos):
-        path = os.path.join(UPLOAD_DIR, f"clip{i}.mp4")
+        filename = f"clip{i}.mp4"
+        path = os.path.join(UPLOAD_DIR, filename)
         file.save(path)
-        video_paths.append(path)
+        video_paths.append(filename)  # store only filename for FFmpeg concat
 
-    audio_path = os.path.join(UPLOAD_DIR, "narration.mp3")
+    # Save narration
+    audio_filename = "narration.mp3"
+    audio_path = os.path.join(UPLOAD_DIR, audio_filename)
     narration.save(audio_path)
 
-    subtitle_path = None
+    # Save subtitle if present
+    subtitle_filename = None
     if subtitle:
-        subtitle_path = os.path.join(UPLOAD_DIR, "subs.srt")
+        subtitle_filename = "subs.srt"
+        subtitle_path = os.path.join(UPLOAD_DIR, subtitle_filename)
         subtitle.save(subtitle_path)
 
-    # Create a file list for concatenation
-    list_path = os.path.join(UPLOAD_DIR, "concat_list.txt")
-    with open(list_path, "w") as f:
-        for path in video_paths:
-            f.write(f"file '{path}'\n")
+    # Create concat list
+    concat_list_path = os.path.join(UPLOAD_DIR, "concat_list.txt")
+    with open(concat_list_path, "w") as f:
+        for filename in video_paths:
+            f.write(f"file '{filename}'\n")
 
-    merged_video = os.path.join(UPLOAD_DIR, f"merged_{uuid.uuid4().hex}.mp4")
+    # Set cwd for subprocess
+    cwd = os.path.abspath(UPLOAD_DIR)
 
-    # Merge clips
+    # Merge video clips
+    merged_filename = f"merged_{uuid.uuid4().hex}.mp4"
     subprocess.run([
-        "ffmpeg", "-f", "concat", "-safe", "0", "-i", list_path,
-        "-c", "copy", merged_video
-    ], check=True)
+        "ffmpeg", "-f", "concat", "-safe", "0", "-i", "concat_list.txt",
+        "-c", "copy", merged_filename
+    ], check=True, cwd=cwd)
 
-    # Add audio + subtitles
-    final_output = os.path.join(UPLOAD_DIR, f"final_{uuid.uuid4().hex}.mp4")
-    command = ["ffmpeg", "-i", merged_video, "-i", audio_path, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-shortest"]
+    # Add audio and optional subtitles
+    final_filename = f"final_{uuid.uuid4().hex}.mp4"
+    command = [
+        "ffmpeg", "-i", merged_filename, "-i", audio_filename,
+        "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-shortest"
+    ]
 
-    if subtitle_path:
-        command += ["-vf", f"subtitles={subtitle_path}"]
+    if subtitle_filename:
+        command += ["-vf", f"subtitles={subtitle_filename}"]
 
-    command += [final_output]
-    subprocess.run(command, check=True)
+    command += [final_filename]
+    subprocess.run(command, check=True, cwd=cwd)
 
-    return send_file(final_output, mimetype="video/mp4")
+    return send_file(os.path.join(cwd, final_filename), mimetype="video/mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
