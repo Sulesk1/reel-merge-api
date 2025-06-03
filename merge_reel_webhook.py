@@ -40,7 +40,7 @@ def cluster_questions():
             "representative": questions[0],
             "size": len(questions),
             "questions": questions,
-            "embedding": centroid
+           # "embedding": centroid
         })
 
         stored_clusters.append({
