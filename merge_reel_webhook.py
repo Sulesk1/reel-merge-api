@@ -87,56 +87,46 @@ def assign_new_question():
         })
 @app.route("/json-to-section-array", methods=["POST"])
 @app.route("/json-to-section-array", methods=["POST"])
+@app.route("/json-to-section-array", methods=["POST"])
 def json_to_section_array():
     try:
+        section_type = request.args.get("target")  # "StructuredSectionsJSON" or "SectionOverviewJSON"
         data = request.get_json(force=True)
-        if not isinstance(data, dict):
-            return jsonify({"error": "Expected a JSON object"}), 400
 
+        if section_type not in data:
+            return jsonify({"error": f"'{section_type}' key not found in posted JSON"}), 400
+
+        sections = data[section_type]
         result = []
 
-        for section_name, content in data.items():
-            # CASE 1: Flat string (e.g. Introduction, Services)
-            if isinstance(content, str):
+        for name, value in sections.items():
+            if isinstance(value, str):
                 result.append({
-                    "section_name": section_name,
-                    "summary": content,
+                    "section_name": name,
+                    "summary": value,
                     "relevance": "",
                     "keywords": []
                 })
-
-            # CASE 2: Object with summary/keywords/etc.
-            elif isinstance(content, dict):
+            elif isinstance(value, dict):
                 result.append({
-                    "section_name": section_name,
-                    "summary": content.get("Summary", ""),
-                    "relevance": content.get("Relevance", ""),
-                    "keywords": content.get("Keywords", [])
+                    "section_name": name,
+                    "summary": value.get("Summary", ""),
+                    "relevance": value.get("Relevance", ""),
+                    "keywords": value.get("Keywords", [])
                 })
-
-            # CASE 3: List of entries (e.g. FAQs, Links)
-            elif isinstance(content, list):
-                for idx, item in enumerate(content):
-                    if isinstance(item, dict):
-                        summary = item.get("Q") or item.get("Purpose") or item.get("Summary") or str(item)
-                        result.append({
-                            "section_name": f"{section_name}[{idx}]",
-                            "summary": summary,
-                            "relevance": "",
-                            "keywords": []
-                        })
-                    else:
-                        result.append({
-                            "section_name": f"{section_name}[{idx}]",
-                            "summary": str(item),
-                            "relevance": "",
-                            "keywords": []
-                        })
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    result.append({
+                        "section_name": f"{name}[{i}]",
+                        "summary": item.get("Q") or item.get("Purpose") or str(item),
+                        "relevance": "",
+                        "keywords": []
+                    })
 
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"error": "Failed to parse StructuredSectionsJSON", "details": str(e)}), 500
+        return jsonify({"error": "Exception occurred", "details": str(e)}), 500
 
 # Render-compatible port binding
 if __name__ == "__main__":
