@@ -85,7 +85,26 @@ def assign_new_question():
             "similarity": float(max_sim),
             "message": "No matching cluster found"
         })
+@app.route("/json-to-section-array", methods=["POST"])
+def json_to_section_array():
+    data = request.get_json()
 
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object with sections as keys"}), 400
+
+    result = []
+    for section_name, content in data.items():
+        if not isinstance(content, dict):
+            continue  # skip if malformed
+
+        result.append({
+            "section_name": section_name,
+            "summary": content.get("Summary", ""),
+            "relevance": content.get("Relevance", ""),
+            "keywords": content.get("Keywords", [])
+        })
+
+    return jsonify(result)
 # Render-compatible port binding
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
